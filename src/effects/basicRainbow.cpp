@@ -5,29 +5,17 @@
 #include <cmath>
 #include <new>
 
-#ifdef VIRTUAL_PANE
-#include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
-extern VirtualMatrixPanel *matrix;
-#else
-#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
-extern MatrixPanel_I2S_DMA *dma_display;
-#endif
+#include "display/LumiDisplay.h"
 
+extern LumiDisplay *dma_display;
 extern uint16_t globalBrightnessScaleFixed;
 
 namespace
 {
-#ifdef VIRTUAL_PANE
-VirtualMatrixPanel *getRainbowDisplay()
-{
-  return matrix;
-}
-#else
-MatrixPanel_I2S_DMA *getRainbowDisplay()
+LumiDisplay *getRainbowDisplay()
 {
   return dma_display;
 }
-#endif
 
 const uint16_t *getHueLutForBrightness(decltype(getRainbowDisplay()) display)
 {

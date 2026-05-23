@@ -3,13 +3,16 @@
 #include <Arduino.h>
 #include <cmath>
 
+#if LF_DISPLAY_BACKEND == 1
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
 #else
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
+#endif
 
 #include "config/debug_config.h"
+#include "display/LumiDisplay.h"
 #include "hardware/deviceConfig.h"
 #include "perf_tuning.h"
 #include "core/PerfTelemetry.h"

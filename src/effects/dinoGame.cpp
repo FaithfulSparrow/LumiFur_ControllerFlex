@@ -5,14 +5,9 @@
 #include <cstdio>
 
 #include "assets/bitmaps.h"
+#include "display/LumiDisplay.h"
 
-#ifdef VIRTUAL_PANE
-#include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
-#else
-#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
-#endif
-
-extern MatrixPanel_I2S_DMA *dma_display;
+extern LumiDisplay *dma_display;
 extern void drawXbm565(int x, int y, int width, int height, const uint8_t *xbm, uint16_t color);
 
 namespace

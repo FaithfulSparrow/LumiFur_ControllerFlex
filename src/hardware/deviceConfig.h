@@ -2,8 +2,18 @@
 
 #include <FastLED.h>
 
+// ── Display backend selection ────────────────────────────────────
+// 1 = HUB75 (default), 2 = FastLED (flexible WS2812B matrix)
+#ifndef LF_DISPLAY_BACKEND
+#define LF_DISPLAY_BACKEND 1
+#endif
+
+#if LF_DISPLAY_BACKEND == 1
 class MatrixPanel_I2S_DMA;
 class VirtualMatrixPanel;
+#endif
+
+#include "display/LumiDisplay.h"
 
 /////////////////////////////////////////////////////
 /////////////////////////////////////////////////////
@@ -210,11 +220,15 @@ extern Adafruit_NeoPixel statusPixel;
 #define TOPDOWN false
 #endif
 
+#if LF_DISPLAY_BACKEND == 1
 #ifdef VIRTUAL_PANE
 extern VirtualMatrixPanel *matrix;
 extern MatrixPanel_I2S_DMA *chain;
 #else
-extern MatrixPanel_I2S_DMA *dma_display;
+extern LumiDisplay *dma_display;
+#endif
+#elif LF_DISPLAY_BACKEND == 2
+extern LumiDisplay *dma_display;
 #endif
 
 // patten change delay

@@ -1,8 +1,21 @@
+#pragma once
+
 #include <cstdint>
 
 #ifndef PROGMEM
 #define PROGMEM
 #endif
+
+// ── Flex bitmaps note ──────────────────────────────────────────
+// When LF_DISPLAY_BACKEND == 2, the coordinate-remap helpers in
+// main.cpp (drawXbm565, drawPlasmaXbm, drawBitmapWithBlink,
+// drawBitmapAdvanced) automatically scale from the 128×32 design
+// canvas to the actual display dimensions via remapDesignX/Y().
+//
+// Flex-native hero bitmaps at panel-native dimensions (e.g. 48×12
+// for a 12cm×48cm WS2812B flex panel) can be authored offline using
+// tools/bitmap_resize.py and placed in assets/bitmaps_flex.h.
+// Until then, the original HUB75 bitmaps below are used directly.
 
 // Bitmaps --------------------------------------------------------------------
 // 'bluetoothBackground', 7x11px

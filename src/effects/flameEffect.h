@@ -4,7 +4,10 @@
 #include <Arduino.h>
 #include <FastLED.h>
 
-#ifdef VIRTUAL_PANE
+#if LF_DISPLAY_BACKEND == 2 || LF_DISPLAY_BACKEND == 1
+#include "display/LumiDisplay.h"
+typedef LumiDisplay DisplayOutputType;
+#elif defined(VIRTUAL_PANE)
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
 typedef VirtualMatrixPanel DisplayOutputType;
 #else

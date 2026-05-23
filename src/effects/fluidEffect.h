@@ -9,13 +9,15 @@
 #define DEBUG_FLUID_EFFECT 0
 #endif
 
-// Determine which display class header to use based on VIRTUAL_PANE define
-#ifdef VIRTUAL_PANE
+#if LF_DISPLAY_BACKEND == 2 || LF_DISPLAY_BACKEND == 1
+#include "display/LumiDisplay.h"
+typedef LumiDisplay MatrixDisplayAdaptor;
+#elif defined(VIRTUAL_PANE)
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
-typedef VirtualMatrixPanel MatrixDisplayAdaptor; 
+typedef VirtualMatrixPanel MatrixDisplayAdaptor;
 #else
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
-typedef MatrixPanel_I2S_DMA MatrixDisplayAdaptor; 
+typedef MatrixPanel_I2S_DMA MatrixDisplayAdaptor;
 #endif
 
 // Forward declare LIS3DH if it's used, or include its header

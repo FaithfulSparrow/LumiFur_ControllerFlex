@@ -6,14 +6,9 @@
 
 #include "core/ColorParser.h"
 #include "config/userPreferences.h"
+#include "display/LumiDisplay.h"
 
-#ifdef VIRTUAL_PANE
-#include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
-extern VirtualMatrixPanel *matrix;
-#else
-#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
-extern MatrixPanel_I2S_DMA *dma_display;
-#endif
+extern LumiDisplay *dma_display;
 
 namespace
 {
@@ -31,17 +26,10 @@ struct StrobeSettings
 
 StrobeSettings gStrobeSettings;
 
-#ifdef VIRTUAL_PANE
-VirtualMatrixPanel *getStrobeDisplay()
-{
-  return matrix;
-}
-#else
-MatrixPanel_I2S_DMA *getStrobeDisplay()
+LumiDisplay *getStrobeDisplay()
 {
   return dma_display;
 }
-#endif
 
 RgbColor toRgbColor(const CRGB &color)
 {

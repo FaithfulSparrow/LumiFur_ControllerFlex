@@ -5,7 +5,7 @@
 
 #include "core/video/MonoVideoCodec.h"
 
-class MatrixPanel_I2S_DMA;
+class LumiDisplay;
 
 struct MonoVideoDebugInfo
 {
@@ -32,7 +32,7 @@ public:
   MonoVideoPlayer &operator=(const MonoVideoPlayer &) = delete;
 
   void begin();
-  void updateAndDraw(MatrixPanel_I2S_DMA *display, uint32_t nowMicros);
+  void updateAndDraw(LumiDisplay *display, uint32_t nowMicros);
 
   bool ready() const;
   const char *error() const;
@@ -47,8 +47,8 @@ private:
   void clearState();
   void resetDebugCounters();
   void setError(const char *message);
-  void drawCurrentFrame(MatrixPanel_I2S_DMA *display) const;
-  void drawError(MatrixPanel_I2S_DMA *display) const;
+  void drawCurrentFrame(LumiDisplay *display) const;
+  void drawError(LumiDisplay *display) const;
   void logDebug(const char *format, ...) const;
 
   fs::FS &filesystem_;

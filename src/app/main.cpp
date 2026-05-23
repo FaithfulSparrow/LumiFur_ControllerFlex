@@ -12,10 +12,11 @@
 #include <Adafruit_GFX.h>
 #include <FFat.h>
 #include <Wire.h> // For I2C sensors
-#ifdef VIRTUAL_PANE
-#include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
-#else
-#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
+
+#if LF_DISPLAY_BACKEND == 1
+#include "display/HUB75Backend.h"
+#elif LF_DISPLAY_BACKEND == 2
+#include "display/FastLEDBackend.h"
 #endif
 
 #include <Adafruit_PixelDust.h> // For sand simulation
@@ -1680,46 +1681,64 @@ static void resetBlePairing()
 }
 
 // Bitmap Drawing Functions ------------------------------------------------
+// ── Bitmap coordinate remapping ──────────────────────────────────
+// Scales coordinates from the 128×32 "design canvas" to the actual
+// display dimensions.  Used by all bitmap drawing helpers so that
+// hard-coded (x, y, w, h) call sites continue to work across any
+// panel size.
+
+static inline int remapDesignX(int designX)
+{
+  return (designX * dma_display->width()) / 128;
+}
+
+static inline int remapDesignY(int designY)
+{
+  return (designY * dma_display->height()) / 32;
+}
+
 void drawXbm565(int x, int y, int width, int height, const uint8_t *xbm, uint16_t color = 0xffff)
 {
   // Ensure width is padded to the nearest byte boundary
   int byteWidth = (width + 7) / 8;
 
+  // Map design-coord bounding box to display coordinates.
+  const int dx0 = remapDesignX(x);
+  const int dy0 = remapDesignY(y);
+  const int dx1 = remapDesignX(x + width);
+  const int dy1 = remapDesignY(y + height);
+
   // Pre-check if entire bitmap is out of bounds
-  if (x >= dma_display->width() || y >= dma_display->height() ||
-      x + width <= 0 || y + height <= 0)
+  if (dx0 >= dma_display->width() || dy0 >= dma_display->height() ||
+      dx1 <= 0 || dy1 <= 0)
   {
     return; // Completely out of bounds, nothing to draw
   }
 
-  // Calculate visible region to avoid per-pixel boundary checks
-  // Use explicit conditionals instead of min/max to avoid overload or macro conflicts.
-  int startX = (0 > -x) ? 0 : -x;
-  int startY = (0 > -y) ? 0 : -y;
-  int tmpEndX = dma_display->width() - x;
-  int endX = (width < tmpEndX) ? width : tmpEndX;
-  int tmpEndY = dma_display->height() - y;
-  int endY = (height < tmpEndY) ? height : tmpEndY;
+  const int dspW = dma_display->width();
+  const int dspH = dma_display->height();
 
-  for (int j = startY; j < endY; j++)
+  // Iterate over display pixels; map back to source bitmap.
+  const int startX = (0 > dx0) ? 0 : dx0;
+  const int startY = (0 > dy0) ? 0 : dy0;
+  const int endX = (dx1 < dspW) ? dx1 : dspW;
+  const int endY = (dy1 < dspH) ? dy1 : dspH;
+
+  for (int dj = startY; dj < endY; ++dj)
   {
-    uint8_t bitMask = 0x80 >> (startX & 7);        // Start with the correct bit position
-    int byteIndex = j * byteWidth + (startX >> 3); // Integer division by 8
+    // Map display y back to source bitmap y (nearest-neighbor).
+    const int sj = (dj * 32) / dspH - y;
+    if (sj < 0 || sj >= height) continue;
+    const uint8_t *rowPtr = xbm + sj * byteWidth;
 
-    for (int i = startX; i < endX; i++)
+    for (int di = startX; di < endX; ++di)
     {
-      // Check if the bit is set
-      if (pgm_read_byte(&xbm[byteIndex]) & bitMask)
-      {
-        dma_display->drawPixel(x + i, y + j, color);
-      }
+      const int si = (di * 128) / dspW - x;
+      if (si < 0 || si >= width) continue;
 
-      // Move to the next bit
-      bitMask >>= 1;
-      if (bitMask == 0)
-      {                 // We've used all bits in this byte
-        bitMask = 0x80; // Reset to the first bit of the next byte
-        byteIndex++;    // Move to the next byte
+      if (pgm_read_byte(&rowPtr[si >> 3]) & (0x80 >> (si & 7)))
+      {
+        dma_display->drawPixel(di, dj, color);
       }
     }
   }
@@ -2205,9 +2224,11 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
         if (rowBits & static_cast<uint8_t>(0x80U >> bitIndex))
         {
           const int pixelX = x + pixelBase + bitIndex;
+          const int dpx = remapDesignX(pixelX);
+          const int dpy = remapDesignY(yj);
           if (useStaticColorMode)
           {
-            drawPixelRgbFast(pixelX, yj, staticColorRgb.r, staticColorRgb.g, staticColorRgb.b);
+            drawPixelRgbFast(dpx, dpy, staticColorRgb.r, staticColorRgb.g, staticColorRgb.b);
           }
           else
           {
@@ -2218,7 +2239,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
             const uint8_t paletteIndex = static_cast<uint8_t>(v + time_offset);
             const CRGB &color = paletteLut[paletteIndex];
 
-            drawPixelRgbFast(pixelX, yj, color.r, color.g, color.b);
+            drawPixelRgbFast(dpx, dpy, color.r, color.g, color.b);
           }
         }
 
@@ -2273,7 +2294,9 @@ void drawBitmapWithBlink(int x, int y, int width, int height, const uint8_t *bit
         g = g * blinkBrightness;
         b = b * blinkBrightness;
 
-        dma_display->drawPixel(x + i, y + j, dma_display->color565(r << 3, g << 2, b << 3));
+        const int dpx = remapDesignX(x + i);
+        const int dpy = remapDesignY(y + j);
+        dma_display->drawPixel(dpx, dpy, dma_display->color565(r << 3, g << 2, b << 3));
       }
     }
   }
@@ -2377,6 +2400,8 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
         if (rowBits & static_cast<uint8_t>(0x80U >> bitIndex))
         {
           const int pixelX = x + pixelBase + bitIndex;
+          const int dpx = remapDesignX(pixelX);
+          const int dpy = remapDesignY(y + j);
         if (enablePlasma)
         {
           // --- Plasma Color Calculation ---
@@ -2387,11 +2412,11 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
             final_color.r = static_cast<uint8_t>((static_cast<uint16_t>(final_color.r) * rowBrightnessScale + 128) >> 8);
             final_color.g = static_cast<uint8_t>((static_cast<uint16_t>(final_color.g) * rowBrightnessScale + 128) >> 8);
             final_color.b = static_cast<uint8_t>((static_cast<uint16_t>(final_color.b) * rowBrightnessScale + 128) >> 8);
-            drawPixelRgbFast(pixelX, y + j, final_color.r, final_color.g, final_color.b);
+            drawPixelRgbFast(dpx, dpy, final_color.r, final_color.g, final_color.b);
           }
           else
           {
-            drawPixelRgbFast(pixelX, y + j, flatRowColor.r, flatRowColor.g, flatRowColor.b);
+            drawPixelRgbFast(dpx, dpy, flatRowColor.r, flatRowColor.g, flatRowColor.b);
           }
         }
 
@@ -4045,6 +4070,17 @@ void setup()
   Serial.println(shouldBleAdvertise() ? "BLE setup complete - advertising started"
                                       : "BLE setup complete - waiting for pairing mode");
 
+#if LF_DISPLAY_BACKEND == 2
+  // ── FastLED / flex matrix backend ──────────────────────────
+  dma_display = new FastLEDBackend(LF_FLEX_WIDTH, LF_FLEX_HEIGHT);
+  dma_display->begin();
+  dma_display->setBrightness8(userBrightness);
+  updateGlobalBrightnessScale(userBrightness);
+  syncBrightnessState(userBrightness);
+  initFlameEffect(dma_display);
+
+#elif LF_DISPLAY_BACKEND == 1
+  // ── HUB75 backend ──────────────────────────────────────────
   // Redefine pins if required
   // HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
   // HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER);
@@ -4068,7 +4104,7 @@ void setup()
   mxconfig.setPixelColorDepthBits(LF_HUB75_COLOR_DEPTH_BITS);
 
 #ifndef VIRTUAL_PANE
-  dma_display = new MatrixPanel_I2S_DMA(mxconfig);
+  dma_display = new HUB75Backend(mxconfig);
   dma_display->begin();
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
@@ -4084,6 +4120,8 @@ void setup()
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
   initFlameEffect(matrix);
 #endif
+
+#endif // LF_DISPLAY_BACKEND
 
   dma_display->clearScreen();
   dma_display->flipDMABuffer();

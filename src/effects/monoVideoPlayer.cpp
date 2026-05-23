@@ -1,6 +1,6 @@
 #include "effects/monoVideoPlayer.h"
 
-#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
+#include "display/LumiDisplay.h"
 #include <Fonts/TomThumb.h>
 
 #include <algorithm>
@@ -385,7 +385,7 @@ void MonoVideoPlayer::begin()
   currentFrameIndex_ = 0;
 }
 
-void MonoVideoPlayer::drawCurrentFrame(MatrixPanel_I2S_DMA *display) const
+void MonoVideoPlayer::drawCurrentFrame(LumiDisplay *display) const
 {
   if (!display || !frameBuffer_ || header_.width == 0 || header_.height == 0)
   {
@@ -518,7 +518,7 @@ void MonoVideoPlayer::drawCurrentFrame(MatrixPanel_I2S_DMA *display) const
   }
 }
 
-void MonoVideoPlayer::drawError(MatrixPanel_I2S_DMA *display) const
+void MonoVideoPlayer::drawError(LumiDisplay *display) const
 {
   if (!display)
   {
@@ -534,7 +534,7 @@ void MonoVideoPlayer::drawError(MatrixPanel_I2S_DMA *display) const
   display->print(errorText_);
 }
 
-void MonoVideoPlayer::updateAndDraw(MatrixPanel_I2S_DMA *display, uint32_t nowMicros)
+void MonoVideoPlayer::updateAndDraw(LumiDisplay *display, uint32_t nowMicros)
 {
   if (!frameLoaded_)
   {

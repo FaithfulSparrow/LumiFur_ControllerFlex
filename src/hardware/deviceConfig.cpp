@@ -8,11 +8,15 @@ Adafruit_APDS9960 apds;
 Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
 #endif
 
+#if LF_DISPLAY_BACKEND == 1
 #ifdef VIRTUAL_PANE
 VirtualMatrixPanel *matrix = nullptr;
 MatrixPanel_I2S_DMA *chain = nullptr;
 #else
-MatrixPanel_I2S_DMA *dma_display = nullptr;
+LumiDisplay *dma_display = nullptr;
+#endif
+#elif LF_DISPLAY_BACKEND == 2
+LumiDisplay *dma_display = nullptr;
 #endif
 
 CRGB leds[1];
