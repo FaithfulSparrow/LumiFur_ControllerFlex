@@ -40,36 +40,46 @@ A real-time firmware for animating a **WS2812B addressable LED matrix Protogen m
 - **Controller:** Adafruit MatrixPortal ESP32-S3 with built-in APDS9960, LIS3DH, status NeoPixel, and onboard microphone. The MatrixPortal is used here as a general-purpose ESP32-S3 dev board — its HUB75 IDC connector is left empty in the Flex build.
 - **Display:** WS2812B (or pin-compatible WS2812) addressable LED matrix, default geometry **48 columns × 12 rows = 576 LEDs**, serpentine row-major wiring (each row reverses direction so the wire snakes back and forth, keeping leads short). Geometry and ordering are configurable via PlatformIO build flags (`LF_FLEX_WIDTH`, `LF_FLEX_HEIGHT`, `LF_FLEX_SERPENTINE`, `LF_FLEX_ROW_MAJOR`, `LF_FLEX_FLIP_X`, `LF_FLEX_FLIP_Y`) — see `src/display/XYMap.h`.
 - **Data pin:** GPIO 14 by default (`LF_LED_DATA_PIN`). On the MatrixPortal S3 this is also the HUB75 `OE` pin — leave the HUB75 IDC connector empty when running the Flex firmware.
-- **Level shifter (strongly recommended):** [Adafruit #1787 — 4-channel Bi-directional Logic Level Converter (TXB0104)](https://www.adafruit.com/product/1787). The MatrixPortal S3's GPIOs are 3.3 V, while WS2812B spec calls for a logic-high of ≥ 0.7 × VDD = **3.5 V at 5 V supply**. Direct connection often works for short runs of newer LEDs but is marginal — the TXB0104 cleanly shifts your 3.3 V data line up to a proper 5 V signal. Wiring is shown in [Wiring the WS2812 matrix](#wiring-the-ws2812-matrix) below.
+- **Level shifter (strongly recommended):** [Adafruit #1787 — 74AHCT125 Quad Level-Shifter (3 V → 5 V)](https://www.adafruit.com/product/1787). This is a **unidirectional**, four-channel buffer with push-pull outputs, powered from a single 5 V rail; its inputs are 3.3 V-compatible and its outputs swing rail-to-rail at 5 V. It's also Adafruit's specifically recommended part for NeoPixel / WS2812 level shifting — see their [NeoPixel Überguide → Logic Level page](https://learn.adafruit.com/adafruit-neopixel-uberguide/logic-level). The MatrixPortal S3's GPIOs are 3.3 V, while WS2812B spec calls for a logic-high of ≥ 0.7 × VDD = **3.5 V at 5 V supply** — direct connection often works for short runs of newer LEDs but is marginal. Wiring is shown in [Wiring the WS2812 matrix](#wiring-the-ws2812-matrix) below.
 - **Power:** Use an **external 5 V PSU** sized for your real worst-case current (~60 mA × LED count × duty cycle). The firmware caps draw at 5 V / 2 A via `FastLED.setMaxPowerInVoltsAndMilliamps` — that's a brightness-scaling cap, not a hardware limit. Do **not** try to power a full matrix off the MatrixPortal's USB-C rail.
 - **Onboard sensors:** APDS9960 (I²C @ default 0x39, SDA=16/SCL=17), LIS3DH (I²C @ 0x19), I²S MEMS mic on A1–A4. All board-specific; the firmware tolerates their absence gracefully on non-MatrixPortal boards.
 - **Inputs:** Onboard buttons (BUTTON_UP=GPIO 6, BUTTON_DOWN=GPIO 7 on the MatrixPortal) map to view navigation; alternate hardware can be remapped in `src/hardware/deviceConfig.h`.
 
 ### Wiring the WS2812 matrix
 
-The TXB0104 is auto-direction-sensing — no DIR pin to wire. Use one of its four channels for the WS2812 data line; leave the other three free for future use (e.g. shifting I²C off-board).
+The 74AHCT125 is a quad buffer with four independent channels (`1A→1Y`, `2A→2Y`, `3A→3Y`, `4A→4Y`), each with its own active-low output-enable (`1/OE` … `4/OE`). Powering it is simple: a single `Vcc` pin (tie to 5 V) and a single `GND`. There is **no separate logic-side rail** — the AHCT input thresholds already accept 3.3 V signals natively while the part is powered at 5 V, which is exactly why this chip family is recommended for 3.3 V → 5 V NeoPixel shifting.
+
+Use one channel for the WS2812 data line; tie all four `/OE` pins to GND so the buffers are always enabled, and ground the unused `A` inputs so they don't float.
 
 ```
-MatrixPortal ESP32-S3           Adafruit #1787 (TXB0104)        WS2812B matrix
-─────────────────────           ────────────────────────        ──────────────
-  3.3 V        ────────────►   VccA
-  GPIO 14 (data) ──────────►   A1            B1  ──[330 Ω]──►   DIN
-  GND  ────────────┬                                               ▲
-                   │                                               │
-                   ├──────►   GND                                  │
-                   │                                               │
-                   │       VccB ◄────────┐                         │
-                   │                     │                         │
-PSU +5 V ──────────│─────────────────────┴──────────────────────►  +5 V  (LEDs)
-PSU GND  ──────────┴────────────────────────────────────────────►  GND   (LEDs)
+MatrixPortal ESP32-S3              Adafruit #1787 (74AHCT125)            WS2812B matrix
+─────────────────────              ──────────────────────────            ──────────────
+  GPIO 14 (data) ────────────►    1A              1Y ──[330 Ω]──►       DIN
+                                                                          ▲
+  GND  ─────────────┬──────────►  GND                                     │
+                    │                                                     │
+                    ├──────────►  1/OE  ┐  ─┐                             │
+                    ├──────────►  2/OE  │   │                             │
+                    ├──────────►  3/OE  │   ├─ all /OEs tied LOW          │
+                    ├──────────►  4/OE  ┘   │  (buffers enabled)          │
+                    ├──────────►  2A    ┐   │                             │
+                    ├──────────►  3A    │   │  unused channels:           │
+                    ├──────────►  4A    ┘  ─┘  inputs grounded, Ys NC     │
+                    │                                                     │
+                    │                                                     │
+PSU +5 V ───────────│──────────►  Vcc  (single supply, 4.5–5.5 V)         │
+                    │                                                     │
+PSU +5 V ───────────│────────────────────────────────────────────────►   +5 V (LEDs)
+PSU GND  ───────────┴────────────────────────────────────────────────►   GND  (LEDs)
 
    1000 µF / ≥10 V electrolytic across +5 V / GND near the first LED.
 ```
 
-- Connect **PSU GND ↔ MatrixPortal GND ↔ Matrix GND** — a common ground is mandatory or the data line voltage is meaningless.
-- The 330 Ω series resistor goes between the level-shifter **output** (B1) and the first LED's DIN. It protects against transmission-line ringing.
-- Keep the wire from the TXB0104 B-side to the first LED short (under ~30 cm). TXB0104 uses one-shot accelerators rather than push-pull drive, so it doesn't like long capacitive loads. For longer cable runs, swap to a 74AHCT125 (single-supply push-pull) instead.
-- The 1000 µF / ≥10 V electrolytic across the LED supply rail near the first LED smooths inrush at frame transitions — standard WS2812B hookup hygiene.
+- Connect **PSU GND ↔ MatrixPortal GND ↔ 74AHCT125 GND ↔ Matrix GND** — a common ground is mandatory or the data line voltage is meaningless.
+- The 330 Ω series resistor goes between `1Y` and the first LED's DIN. It damps transmission-line ringing.
+- The 74AHCT125 has true push-pull outputs and is comfortable driving WS2812 data over typical wiring (well past a metre). It's a much better choice for this than auto-direction shifters like the TXB0104, which use weak one-shot accelerators and tend to flake out on longer leads. Even so, keep the run between `1Y` and the first LED reasonably short and away from noisy power leads.
+- The 1000 µF / ≥10 V electrolytic across the LED supply rail near the first LED smooths inrush at frame transitions — standard WS2812B hookup hygiene.
+- Ground the unused inputs (`2A`, `3A`, `4A`). Floating CMOS inputs draw shoot-through current and pick up noise.
 
 ## Build & Flash
 
