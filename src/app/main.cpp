@@ -1682,19 +1682,27 @@ static void resetBlePairing()
 
 // Bitmap Drawing Functions ------------------------------------------------
 // ── Bitmap coordinate remapping ──────────────────────────────────
-// Scales coordinates from the 128×32 "design canvas" to the actual
-// display dimensions.  Used by all bitmap drawing helpers so that
-// hard-coded (x, y, w, h) call sites continue to work across any
-// panel size.
+// All bitmap call sites use coordinates in a fixed "design canvas"
+// whose size is LF_DESIGN_WIDTH × LF_DESIGN_HEIGHT (the original
+// HUB75 pane geometry: 128 × 32).  The helpers below scale design
+// coordinates to whatever the active backend reports for its
+// width()/height(), so the same bitmaps render correctly on the
+// HUB75 backend (identity scale) and on smaller WS2812 matrices.
+#ifndef LF_DESIGN_WIDTH
+#define LF_DESIGN_WIDTH  128
+#endif
+#ifndef LF_DESIGN_HEIGHT
+#define LF_DESIGN_HEIGHT 32
+#endif
 
 static inline int remapDesignX(int designX)
 {
-  return (designX * dma_display->width()) / 128;
+  return (designX * dma_display->width()) / LF_DESIGN_WIDTH;
 }
 
 static inline int remapDesignY(int designY)
 {
-  return (designY * dma_display->height()) / 32;
+  return (designY * dma_display->height()) / LF_DESIGN_HEIGHT;
 }
 
 void drawXbm565(int x, int y, int width, int height, const uint8_t *xbm, uint16_t color = 0xffff)
@@ -1727,13 +1735,13 @@ void drawXbm565(int x, int y, int width, int height, const uint8_t *xbm, uint16_
   for (int dj = startY; dj < endY; ++dj)
   {
     // Map display y back to source bitmap y (nearest-neighbor).
-    const int sj = (dj * 32) / dspH - y;
+    const int sj = (dj * LF_DESIGN_HEIGHT) / dspH - y;
     if (sj < 0 || sj >= height) continue;
     const uint8_t *rowPtr = xbm + sj * byteWidth;
 
     for (int di = startX; di < endX; ++di)
     {
-      const int si = (di * 128) / dspW - x;
+      const int si = (di * LF_DESIGN_WIDTH) / dspW - x;
       if (si < 0 || si >= width) continue;
 
       if (pgm_read_byte(&rowPtr[si >> 3]) & (0x80 >> (si & 7)))
@@ -2178,7 +2186,6 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
     return;
   }
   const uint16_t scaleHalfFixed = scaleFixed >> 1;
-  int32_t startXFixed = static_cast<int32_t>(x) * static_cast<int32_t>(scaleFixed);
 
   const uint16_t animSpeedFixed = static_cast<uint16_t>(animSpeed * 256.0f);
   const uint32_t effectiveTimeFixed = static_cast<uint32_t>(time_counter) * animSpeedFixed;
@@ -2189,62 +2196,62 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
   const uint16_t brightnessScaleFixed = combinedBrightnessScale;
   const CRGB *paletteLut = useStaticColorMode ? nullptr : getScaledPlasmaPaletteLut(brightnessScaleFixed);
 
-  for (int j = 0; j < height; ++j)
+  // Iterate display pixels; back-map to source bitmap.  Each source-pixel
+  // hit-test happens at most once per display pixel, so detail is preserved
+  // across non-integer scales (e.g. 128→48 on the Flex backend).
+  const int dspW = dma_display->width();
+  const int dspH = dma_display->height();
+
+  const int dx0 = remapDesignX(x);
+  const int dy0 = remapDesignY(y);
+  const int dx1 = remapDesignX(x + width);
+  const int dy1 = remapDesignY(y + height);
+  if (dx0 >= dspW || dy0 >= dspH || dx1 <= 0 || dy1 <= 0)
   {
-    const int yj = y + j;
+    return;
+  }
+
+  const int startX = (0 > dx0) ? 0 : dx0;
+  const int startY = (0 > dy0) ? 0 : dy0;
+  const int endX = (dx1 < dspW) ? dx1 : dspW;
+  const int endY = (dy1 < dspH) ? dy1 : dspH;
+
+  for (int dj = startY; dj < endY; ++dj)
+  {
+    const int sj = (dj * LF_DESIGN_HEIGHT) / dspH - y;
+    if (sj < 0 || sj >= height) continue;
+    const int yj = y + sj;
     const int32_t yScaleFixed = static_cast<int32_t>(yj) * scaleFixed;
     const uint8_t cos_val = cos8(static_cast<uint8_t>((yScaleFixed >> 8) + t2));
-    int32_t tempFixed = static_cast<int32_t>(x + yj) * scaleHalfFixed;
-    int32_t xFixed = startXFixed;
-    const uint8_t *rowPtr = reinterpret_cast<const uint8_t *>(xbm) + j * byteWidth;
+    const uint8_t *rowPtr = reinterpret_cast<const uint8_t *>(xbm) + sj * byteWidth;
 
-    for (int byteIndex = 0; byteIndex < byteWidth; ++byteIndex)
+    for (int di = startX; di < endX; ++di)
     {
-      const uint8_t rowBits = rowPtr[byteIndex];
-      const int pixelBase = byteIndex << 3;
-      int pixelsInByte = width - pixelBase;
-      if (pixelsInByte > 8)
-      {
-        pixelsInByte = 8;
-      }
-      if (pixelsInByte <= 0)
-      {
-        break;
-      }
+      const int si = (di * LF_DESIGN_WIDTH) / dspW - x;
+      if (si < 0 || si >= width) continue;
 
-      if (rowBits == 0)
+      if (!(pgm_read_byte(&rowPtr[si >> 3]) & (0x80U >> (si & 7))))
       {
-        xFixed += static_cast<int32_t>(scaleFixed) * pixelsInByte;
-        tempFixed += static_cast<int32_t>(scaleHalfFixed) * pixelsInByte;
         continue;
       }
 
-      for (int bitIndex = 0; bitIndex < pixelsInByte; ++bitIndex)
+      if (useStaticColorMode)
       {
-        if (rowBits & static_cast<uint8_t>(0x80U >> bitIndex))
-        {
-          const int pixelX = x + pixelBase + bitIndex;
-          const int dpx = remapDesignX(pixelX);
-          const int dpy = remapDesignY(yj);
-          if (useStaticColorMode)
-          {
-            drawPixelRgbFast(dpx, dpy, staticColorRgb.r, staticColorRgb.g, staticColorRgb.b);
-          }
-          else
-          {
-            const uint8_t sin_val = sin8(static_cast<uint8_t>((xFixed >> 8) + t));
-            const uint8_t sin_val2 = sin8(static_cast<uint8_t>((tempFixed >> 8) + t3));
-            const uint8_t v = sin_val + cos_val + sin_val2;
+        drawPixelRgbFast(di, dj, staticColorRgb.r, staticColorRgb.g, staticColorRgb.b);
+      }
+      else
+      {
+        const int pixelX = x + si;
+        const int32_t xFixed = static_cast<int32_t>(pixelX) * static_cast<int32_t>(scaleFixed);
+        const int32_t tempFixed = static_cast<int32_t>(pixelX + yj) * static_cast<int32_t>(scaleHalfFixed);
+        const uint8_t sin_val = sin8(static_cast<uint8_t>((xFixed >> 8) + t));
+        const uint8_t sin_val2 = sin8(static_cast<uint8_t>((tempFixed >> 8) + t3));
+        const uint8_t v = sin_val + cos_val + sin_val2;
 
-            const uint8_t paletteIndex = static_cast<uint8_t>(v + time_offset);
-            const CRGB &color = paletteLut[paletteIndex];
+        const uint8_t paletteIndex = static_cast<uint8_t>(v + time_offset);
+        const CRGB &color = paletteLut[paletteIndex];
 
-            drawPixelRgbFast(dpx, dpy, color.r, color.g, color.b);
-          }
-        }
-
-        xFixed += scaleFixed;
-        tempFixed += scaleHalfFixed;
+        drawPixelRgbFast(di, dj, color.r, color.g, color.b);
       }
     }
   }
@@ -2268,35 +2275,58 @@ void drawText(int colorWheelOffset)
 // NEW function to draw bitmap with blink squash effect
 void drawBitmapWithBlink(int x, int y, int width, int height, const uint8_t *bitmap, uint16_t color, int progress)
 {
-  int byteWidth = (width + 7) / 8;
-  float center_y = (height - 1) / 2.0f;
+  const int byteWidth = (width + 7) / 8;
+  const float center_y = (height - 1) / 2.0f;
 
   // This formula replicates the "w" calculation from the emulator for the squash effect
-  float w = 0.005f + (1.0f - 0.005f) * (progress / 100.0f);
+  const float w = 0.005f + (1.0f - 0.005f) * (progress / 100.0f);
 
-  for (int j = 0; j < height; j++)
+  const uint8_t srcR = (color >> 11) & 0x1F;
+  const uint8_t srcG = (color >> 5) & 0x3F;
+  const uint8_t srcB = color & 0x1F;
+
+  // Iterate display pixels; back-map to source bitmap so detail is preserved
+  // on non-integer scales (e.g. 128→48 on the Flex backend).
+  const int dspW = dma_display->width();
+  const int dspH = dma_display->height();
+
+  const int dx0 = remapDesignX(x);
+  const int dy0 = remapDesignY(y);
+  const int dx1 = remapDesignX(x + width);
+  const int dy1 = remapDesignY(y + height);
+  if (dx0 >= dspW || dy0 >= dspH || dx1 <= 0 || dy1 <= 0)
   {
-    for (int i = 0; i < width; i++)
+    return;
+  }
+
+  const int startX = (0 > dx0) ? 0 : dx0;
+  const int startY = (0 > dy0) ? 0 : dy0;
+  const int endX = (dx1 < dspW) ? dx1 : dspW;
+  const int endY = (dy1 < dspH) ? dy1 : dspH;
+
+  for (int dj = startY; dj < endY; ++dj)
+  {
+    const int sj = (dj * LF_DESIGN_HEIGHT) / dspH - y;
+    if (sj < 0 || sj >= height) continue;
+
+    const float blinkBrightness = powf(2.0f, -w * powf(sj - center_y, 2));
+    if (blinkBrightness < 0.01f) continue;
+
+    const uint8_t rr = static_cast<uint8_t>(srcR * blinkBrightness);
+    const uint8_t gg = static_cast<uint8_t>(srcG * blinkBrightness);
+    const uint8_t bb = static_cast<uint8_t>(srcB * blinkBrightness);
+    const uint16_t blinkedColor = dma_display->color565(rr << 3, gg << 2, bb << 3);
+
+    const uint8_t *rowPtr = bitmap + sj * byteWidth;
+
+    for (int di = startX; di < endX; ++di)
     {
-      if (pgm_read_byte(&bitmap[j * byteWidth + i / 8]) & (0x80 >> (i % 8)))
+      const int si = (di * LF_DESIGN_WIDTH) / dspW - x;
+      if (si < 0 || si >= width) continue;
+
+      if (pgm_read_byte(&rowPtr[si >> 3]) & (0x80U >> (si & 7)))
       {
-        // Calculate brightness based on vertical distance from center, modulated by 'w'
-        float blinkBrightness = pow(2, -w * pow(j - center_y, 2));
-        if (blinkBrightness < 0.01)
-          continue;
-
-        // Apply the main color modulated by the blink brightness
-        uint8_t r = (color >> 11) & 0x1F;
-        uint8_t g = (color >> 5) & 0x3F;
-        uint8_t b = color & 0x1F;
-
-        r = r * blinkBrightness;
-        g = g * blinkBrightness;
-        b = b * blinkBrightness;
-
-        const int dpx = remapDesignX(x + i);
-        const int dpy = remapDesignY(y + j);
-        dma_display->drawPixel(dpx, dpy, dma_display->color565(r << 3, g << 2, b << 3));
+        dma_display->drawPixel(di, dj, blinkedColor);
       }
     }
   }
@@ -2340,15 +2370,35 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
     scaleHalf = scale * 0.5f;
   }
 
-  for (int j = 0; j < height; j++)
+  // Iterate display pixels; back-map to source bitmap.  Detail is preserved
+  // across non-integer scales (e.g. 128→48 on the Flex backend) because each
+  // display pixel sources at most one bitmap pixel and there are no source
+  // pixels writing to the same display column.
+  const int dspW = dma_display->width();
+  const int dspH = dma_display->height();
+
+  const int dx0 = remapDesignX(x);
+  const int dy0 = remapDesignY(y);
+  const int dx1 = remapDesignX(x + width);
+  const int dy1 = remapDesignY(y + height);
+  if (dx0 >= dspW || dy0 >= dspH || dx1 <= 0 || dy1 <= 0)
   {
-    // --- OPTIMIZATION: Calculate blink brightness once per row ---
-    const float blinkBrightness = powf(2.0f, -w * powf(j - center_y, 2));
-    // If the entire row is too dim to be visible, skip it completely.
-    if (blinkBrightness < 0.01f)
-    {
-      continue;
-    }
+    return;
+  }
+
+  const int startX = (0 > dx0) ? 0 : dx0;
+  const int startY = (0 > dy0) ? 0 : dy0;
+  const int endX = (dx1 < dspW) ? dx1 : dspW;
+  const int endY = (dy1 < dspH) ? dy1 : dspH;
+
+  for (int dj = startY; dj < endY; ++dj)
+  {
+    const int sj = (dj * LF_DESIGN_HEIGHT) / dspH - y;
+    if (sj < 0 || sj >= height) continue;
+
+    // --- Blink brightness: constant for this source row ---
+    const float blinkBrightness = powf(2.0f, -w * powf(sj - center_y, 2));
+    if (blinkBrightness < 0.01f) continue;
 
     const uint16_t rowBrightnessScale = static_cast<uint16_t>(blinkBrightness * globalBrightnessScaleFixed);
     CRGB flatRowColor = CRGB::Black;
@@ -2360,71 +2410,43 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
       flatRowColor.b = static_cast<uint8_t>((static_cast<uint16_t>(flatRowColor.b) * rowBrightnessScale + 128) >> 8);
     }
 
-    // Pre-calculate plasma values that are constant for the row
-    const float y_val_plasma = (y + j) * scale;
-    float temp_val_plasma = (x + y + j) * scaleHalf;
-    float x_val_plasma = x * scale;
+    // Pre-calculate plasma row-constants (in source-space)
+    const float y_val_plasma = (y + sj) * scale;
     uint8_t cos_val_plasma = 0;
     if (enablePlasma)
     {
       cos_val_plasma = cos8(y_val_plasma + t2);
     }
 
-    const uint8_t *rowPtr = bitmap + (j * byteWidth);
-    for (int byteIndex = 0; byteIndex < byteWidth; ++byteIndex)
-    {
-      const uint8_t rowBits = pgm_read_byte(rowPtr + byteIndex);
-      const int pixelBase = byteIndex << 3;
-      int pixelsInByte = width - pixelBase;
-      if (pixelsInByte > 8)
-      {
-        pixelsInByte = 8;
-      }
-      if (pixelsInByte <= 0)
-      {
-        break;
-      }
+    const uint8_t *rowPtr = bitmap + (sj * byteWidth);
 
-      if (rowBits == 0)
+    for (int di = startX; di < endX; ++di)
+    {
+      const int si = (di * LF_DESIGN_WIDTH) / dspW - x;
+      if (si < 0 || si >= width) continue;
+
+      if (!(pgm_read_byte(&rowPtr[si >> 3]) & (0x80U >> (si & 7))))
       {
-        if (enablePlasma)
-        {
-          x_val_plasma += scale * pixelsInByte;
-          temp_val_plasma += scaleHalf * pixelsInByte;
-        }
         continue;
       }
 
-      for (int bitIndex = 0; bitIndex < pixelsInByte; ++bitIndex)
+      if (enablePlasma)
       {
-        if (rowBits & static_cast<uint8_t>(0x80U >> bitIndex))
-        {
-          const int pixelX = x + pixelBase + bitIndex;
-          const int dpx = remapDesignX(pixelX);
-          const int dpy = remapDesignY(y + j);
-        if (enablePlasma)
-        {
-          // --- Plasma Color Calculation ---
-          uint8_t sin_val = sin8(x_val_plasma + t);
-          uint8_t sin_val2 = sin8(temp_val_plasma + t3);
-          uint8_t v = sin_val + cos_val_plasma + sin_val2;
-            CRGB final_color = ColorFromPalette(currentPalette, v + time_offset);
-            final_color.r = static_cast<uint8_t>((static_cast<uint16_t>(final_color.r) * rowBrightnessScale + 128) >> 8);
-            final_color.g = static_cast<uint8_t>((static_cast<uint16_t>(final_color.g) * rowBrightnessScale + 128) >> 8);
-            final_color.b = static_cast<uint8_t>((static_cast<uint16_t>(final_color.b) * rowBrightnessScale + 128) >> 8);
-            drawPixelRgbFast(dpx, dpy, final_color.r, final_color.g, final_color.b);
-          }
-          else
-          {
-            drawPixelRgbFast(dpx, dpy, flatRowColor.r, flatRowColor.g, flatRowColor.b);
-          }
-        }
-
-        if (enablePlasma)
-        {
-          x_val_plasma += scale;
-          temp_val_plasma += scaleHalf;
-        }
+        const int pixelX = x + si;
+        const float x_val_plasma = pixelX * scale;
+        const float temp_val_plasma = (pixelX + y + sj) * scaleHalf;
+        uint8_t sin_val = sin8(x_val_plasma + t);
+        uint8_t sin_val2 = sin8(temp_val_plasma + t3);
+        uint8_t v = sin_val + cos_val_plasma + sin_val2;
+        CRGB final_color = ColorFromPalette(currentPalette, v + time_offset);
+        final_color.r = static_cast<uint8_t>((static_cast<uint16_t>(final_color.r) * rowBrightnessScale + 128) >> 8);
+        final_color.g = static_cast<uint8_t>((static_cast<uint16_t>(final_color.g) * rowBrightnessScale + 128) >> 8);
+        final_color.b = static_cast<uint8_t>((static_cast<uint16_t>(final_color.b) * rowBrightnessScale + 128) >> 8);
+        drawPixelRgbFast(di, dj, final_color.r, final_color.g, final_color.b);
+      }
+      else
+      {
+        drawPixelRgbFast(di, dj, flatRowColor.r, flatRowColor.g, flatRowColor.b);
       }
     }
   }

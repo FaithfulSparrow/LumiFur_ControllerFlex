@@ -2,6 +2,12 @@
 // Standalone validation of XY() coordinate mapping.
 // Compile: g++ -std=c++11 -Isrc -o /tmp/test_xy test/test_display/test_xy_standalone.cpp && /tmp/test_xy
 // No Unity framework dependency — pure assert().
+//
+// When PlatformIO runs `pio test`, it defines UNIT_TEST and links every
+// .cpp under test/test_display/ into one binary; this file would then
+// collide with test_display.cpp's main().  Skip the standalone build
+// under PIO so the Unity suite owns main().
+#ifndef UNIT_TEST
 
 #include <cstdio>
 #include <cstdlib>
@@ -226,3 +232,5 @@ int main()
         return 1;
     }
 }
+
+#endif // !UNIT_TEST
